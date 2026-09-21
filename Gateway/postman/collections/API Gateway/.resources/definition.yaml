@@ -1,0 +1,10 @@
+$kind: collection
+description: |-
+  Collection for the Distributed API Gateway Platform.
+
+  The Gateway runs on {{gatewayBaseUrl}} (default: [http://localhost:5000](http://localhost:5019)) and  
+  proxies requests to downstream microservices.
+
+  Use the **Gateway - Local** environment to configure base URLs.
+variables:
+  gatewayBaseUrl: http://localhost:5000

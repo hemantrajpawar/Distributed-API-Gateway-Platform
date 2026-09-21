@@ -1,0 +1,3 @@
+$kind: collection
+name: Users
+description: Endpoints for user management, proxied by the Gateway to the Users service at http://localhost:5001.

@@ -1,0 +1,6 @@
+name: Gateway - Local
+values:
+  - key: gatewayBaseUrl
+    value: 'http://localhost:5000'
+  - key: usersServiceBaseUrl
+    value: 'http://localhost:5001'
