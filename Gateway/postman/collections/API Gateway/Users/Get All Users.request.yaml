@@ -12,6 +12,7 @@ body:
     \    \"email\":\"rag123@abhdb.com\"\r
 
     }"
+examples: .resources/Get All Users.resources/examples
 order: 1000
 description: |-
   Retrieves all users via the API Gateway.

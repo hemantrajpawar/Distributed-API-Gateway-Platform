@@ -1,0 +1,32 @@
+$kind: http-example
+request:
+  url: "{{gatewayBaseUrl}}/api/users"
+  method: GET
+  body:
+    type: json
+    content: "{\r
+
+      \    \"name\":\"raj\",\r
+
+      \    \"email\":\"rag123@abhdb.com\"\r
+
+      }"
+response:
+  statusCode: 200
+  statusText: OK
+  headers:
+    content-type: application/json; charset=utf-8
+    date: Fri, 25 Sep 2026 15:45:02 GMT
+    server: Kestrel
+    transfer-encoding: chunked
+    x-ratelimit-limit: "100"
+    x-ratelimit-remaining: "99"
+  body:
+    type: json
+    content: |-
+      {
+        "service": "User Service",
+        "instance": "user-service-1",
+        "message": "Hello from User Service"
+      }
+order: 1790351112949

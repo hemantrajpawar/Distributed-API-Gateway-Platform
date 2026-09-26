@@ -12,4 +12,7 @@
   <ItemGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
     <SourceRoot Include="C:\Users\Administrator\.nuget\packages\" />
   </ItemGroup>
+  <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)stackexchange.redis\3.3.0\build\StackExchange.Redis.props" Condition="Exists('$(NuGetPackageRoot)stackexchange.redis\3.3.0\build\StackExchange.Redis.props')" />
+  </ImportGroup>
 </Project>

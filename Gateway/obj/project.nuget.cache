@@ -1,8 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "+VU35WUVV3s=",
+  "dgSpecHash": "Hal2DUdFYc8=",
   "success": true,
   "projectFilePath": "C:\\Users\\Administrator\\Desktop\\web development\\C# and .NET DEVELOPMENT\\Distributed API Gateway Platform\\Gateway\\Gateway.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\Administrator\\.nuget\\packages\\respite\\3.3.0\\respite.3.3.0.nupkg.sha512",
+    "C:\\Users\\Administrator\\.nuget\\packages\\stackexchange.redis\\3.3.0\\stackexchange.redis.3.3.0.nupkg.sha512",
+    "C:\\Users\\Administrator\\.nuget\\packages\\system.io.hashing\\10.0.12\\system.io.hashing.10.0.12.nupkg.sha512"
+  ],
   "logs": []
 }

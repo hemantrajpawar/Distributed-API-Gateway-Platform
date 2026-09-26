@@ -1,3 +1,5 @@
+// namespace BackgroundService;
+
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 

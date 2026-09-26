@@ -27,3 +27,8 @@ C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distribut
 C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\obj\Debug\net10.0\Gateway.pdb
 C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\obj\Debug\net10.0\Gateway.genruntimeconfig.cache
 C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\obj\Debug\net10.0\ref\Gateway.dll
+C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\obj\Debug\net10.0\Gateway.csproj.AssemblyReference.cache
+C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\bin\Debug\net10.0\RESPite.dll
+C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\bin\Debug\net10.0\StackExchange.Redis.dll
+C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\bin\Debug\net10.0\System.IO.Hashing.dll
+C:\Users\Administrator\Desktop\web development\C# and .NET DEVELOPMENT\Distributed API Gateway Platform\Gateway\obj\Debug\net10.0\Gateway.csproj.Up2Date
