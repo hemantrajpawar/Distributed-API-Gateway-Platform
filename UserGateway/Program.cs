@@ -1,17 +1,18 @@
 using ReverseProxyService;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
 
 // ==================================================
-// 1. Register HTTP client
+// 1. Register HTTP Client
 // ==================================================
 
 builder.Services.AddHttpClient();
 
 
 // ==================================================
-// 2. Active UserService instances
+// 2. Active UserService Instances
 // ==================================================
 
 builder.Services.AddSingleton(
@@ -47,30 +48,47 @@ builder.Services.AddSingleton<ReverseProxyService>();
 builder.Services.AddHostedService<HealthCheckWorker>();
 
 
+// ==================================================
+// 6. Circuit Breaker
+// ==================================================
+
+builder.Services.AddSingleton(
+    new CircuitBreakerOptions
+    {
+        FailureThreshold = 3,
+        OpenDuration = TimeSpan.FromSeconds(30)
+    }
+);
+
+builder.Services.AddSingleton<CircuitBreakerManager>();
+
+
+// ==================================================
+// 7. Instance Selector
+// ==================================================
+
+builder.Services.AddSingleton<InstanceSelector>();
+
+
 var app = builder.Build();
 
 
 // ==================================================
-// Round Robin counter
-// ==================================================
-
-static int userServiceIndex = 0;
-
-
-// ==================================================
-// 6. User Gateway endpoint
+// 8. User Gateway Endpoint
 // ==================================================
 
 app.Map("/{**path}", async (
     HttpContext context,
     ReverseProxyService proxyService,
-    ActiveInstancePool instancePool) =>
+    InstanceSelector instanceSelector) =>
 {
     // ==================================================
-    // 7. Get incoming path
+    // 9. Get Incoming Path
     // ==================================================
 
-    var path = context.Request.Path;
+    var path =
+        context.Request.Path;
+
 
     Console.WriteLine();
     Console.WriteLine("========== USER GATEWAY ==========");
@@ -85,7 +103,7 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 8. Make sure this is a User API request
+    // 10. Validate User API Path
     // ==================================================
 
     if (!path.StartsWithSegments("/api/users"))
@@ -99,7 +117,7 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 9. Remove /api prefix
+    // 11. Remove /api Prefix
     //
     // /api/users
     //      ↓
@@ -111,23 +129,35 @@ app.Map("/{**path}", async (
     // ==================================================
 
     var servicePath =
-        path.Value!.Substring("/api".Length);
+        path.Value!.Substring(
+            "/api".Length
+        );
 
 
     // ==================================================
-    // 10. Get currently healthy instances
+    // 12. Select UserService Instance
+    //
+    // InstanceSelector handles:
+    //
+    // - Active instances
+    // - Round robin
+    // - Circuit breaker
     // ==================================================
 
-    var instances =
-        instancePool.GetInstances();
+    var selected =
+        instanceSelector.Select();
 
 
     // ==================================================
-    // 11. No healthy instances available
+    // 13. No Available Instance
     // ==================================================
 
-    if (instances.Length == 0)
+    if (selected == null)
     {
+        Console.WriteLine(
+            "No UserService instance available"
+        );
+
         return Results.StatusCode(
             StatusCodes.Status503ServiceUnavailable
         );
@@ -135,18 +165,14 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 12. Round Robin Load Balancing
+    // 14. Get Selected Instance + Circuit
     // ==================================================
 
-    var index =
-        Interlocked.Increment(
-            ref userServiceIndex
-        )
-        % instances.Length;
-
-
     var targetBaseUrl =
-        instances[index];
+        selected.BaseUrl;
+
+    var selectedCircuit =
+        selected.Circuit;
 
 
     Console.WriteLine(
@@ -155,7 +181,7 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 13. Build final UserService URL
+    // 15. Build Final UserService URL
     // ==================================================
 
     var targetUrl =
@@ -170,14 +196,47 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 14. Reverse Proxy
+    // 16. Reverse Proxy
     // ==================================================
 
-    var result =
+    var proxyResponse =
         await proxyService.ForwardAsync(
             context,
             targetUrl
         );
+
+
+    // ==================================================
+    // 17. Record Circuit Breaker Result
+    // ==================================================
+
+    if (proxyResponse == null)
+    {
+        Console.WriteLine(
+            $"Circuit failure: {targetBaseUrl}"
+        );
+
+        selectedCircuit.RecordFailure();
+    }
+    else if (
+        proxyResponse.StatusCode >= 500
+        && proxyResponse.StatusCode <= 599)
+    {
+        Console.WriteLine(
+            $"Circuit failure: {targetBaseUrl} " +
+            $"Status: {proxyResponse.StatusCode}"
+        );
+
+        selectedCircuit.RecordFailure();
+    }
+    else
+    {
+        Console.WriteLine(
+            $"Circuit success: {targetBaseUrl}"
+        );
+
+        selectedCircuit.RecordSuccess();
+    }
 
 
     Console.WriteLine(
@@ -185,7 +244,7 @@ app.Map("/{**path}", async (
     );
 
 
-    return result;
+    return Results.Empty;
 });
 
 

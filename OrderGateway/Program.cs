@@ -1,5 +1,6 @@
 using ReverseProxyService;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
 
@@ -11,7 +12,7 @@ builder.Services.AddHttpClient();
 
 
 // ==================================================
-// 2. Active OrderService instances
+// 2. Active OrderService Instances
 // ==================================================
 
 builder.Services.AddSingleton(
@@ -41,36 +42,53 @@ builder.Services.AddSingleton<ReverseProxyService>();
 
 
 // ==================================================
-// 5. Health Check Worker
+// 5. Background Health Check Worker
 // ==================================================
 
 builder.Services.AddHostedService<HealthCheckWorker>();
+
+
+// ==================================================
+// 6. Circuit Breaker
+// ==================================================
+
+builder.Services.AddSingleton(
+    new CircuitBreakerOptions
+    {
+        FailureThreshold = 3,
+        OpenDuration = TimeSpan.FromSeconds(30)
+    }
+);
+
+builder.Services.AddSingleton<CircuitBreakerManager>();
+
+
+// ==================================================
+// 7. Instance Selector
+// ==================================================
+
+builder.Services.AddSingleton<InstanceSelector>();
 
 
 var app = builder.Build();
 
 
 // ==================================================
-// Round Robin counter
-// ==================================================
-
-static int orderServiceIndex = 0;
-
-
-// ==================================================
-// 6. Order Gateway
+// 8. Order Gateway Endpoint
 // ==================================================
 
 app.Map("/{**path}", async (
     HttpContext context,
     ReverseProxyService proxyService,
-    ActiveInstancePool instancePool) =>
+    InstanceSelector instanceSelector) =>
 {
     // ==================================================
-    // 7. Get incoming path
+    // 9. Get Incoming Path
     // ==================================================
 
-    var path = context.Request.Path;
+    var path =
+        context.Request.Path;
+
 
     Console.WriteLine();
     Console.WriteLine("========== ORDER GATEWAY ==========");
@@ -85,7 +103,7 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 8. Make sure this is an Order API request
+    // 10. Validate Order API Path
     // ==================================================
 
     if (!path.StartsWithSegments("/api/orders"))
@@ -99,7 +117,7 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 9. Remove /api prefix
+    // 11. Remove /api Prefix
     //
     // /api/orders
     //       ↓
@@ -111,19 +129,35 @@ app.Map("/{**path}", async (
     // ==================================================
 
     var servicePath =
-        path.Value!.Substring("/api".Length);
+        path.Value!.Substring(
+            "/api".Length
+        );
 
 
     // ==================================================
-    // 10. Get healthy OrderService instances
+    // 12. Select OrderService Instance
+    //
+    // InstanceSelector handles:
+    //
+    // - Active instances
+    // - Round robin
+    // - Circuit breaker
     // ==================================================
 
-    var instances =
-        instancePool.GetInstances();
+    var selected =
+        instanceSelector.Select();
 
 
-    if (instances.Length == 0)
+    // ==================================================
+    // 13. No Available Instance
+    // ==================================================
+
+    if (selected == null)
     {
+        Console.WriteLine(
+            "No OrderService instance available"
+        );
+
         return Results.StatusCode(
             StatusCodes.Status503ServiceUnavailable
         );
@@ -131,18 +165,14 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 11. Round Robin Load Balancing
+    // 14. Get Selected Instance + Circuit
     // ==================================================
 
-    var index =
-        Interlocked.Increment(
-            ref orderServiceIndex
-        )
-        % instances.Length;
-
-
     var targetBaseUrl =
-        instances[index];
+        selected.BaseUrl;
+
+    var selectedCircuit =
+        selected.Circuit;
 
 
     Console.WriteLine(
@@ -151,7 +181,7 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 12. Build final OrderService URL
+    // 15. Build Final OrderService URL
     // ==================================================
 
     var targetUrl =
@@ -166,13 +196,55 @@ app.Map("/{**path}", async (
 
 
     // ==================================================
-    // 13. Reverse Proxy
+    // 16. Reverse Proxy
     // ==================================================
 
-    return await proxyService.ForwardAsync(
-        context,
-        targetUrl
+    var proxyResponse =
+        await proxyService.ForwardAsync(
+            context,
+            targetUrl
+        );
+
+
+    // ==================================================
+    // 17. Record Circuit Breaker Result
+    // ==================================================
+
+    if (proxyResponse == null)
+    {
+        Console.WriteLine(
+            $"Circuit failure: {targetBaseUrl}"
+        );
+
+        selectedCircuit.RecordFailure();
+    }
+    else if (
+        proxyResponse.StatusCode >= 500
+        && proxyResponse.StatusCode <= 599)
+    {
+        Console.WriteLine(
+            $"Circuit failure: {targetBaseUrl} " +
+            $"Status: {proxyResponse.StatusCode}"
+        );
+
+        selectedCircuit.RecordFailure();
+    }
+    else
+    {
+        Console.WriteLine(
+            $"Circuit success: {targetBaseUrl}"
+        );
+
+        selectedCircuit.RecordSuccess();
+    }
+
+
+    Console.WriteLine(
+        "================================="
     );
+
+
+    return Results.Empty;
 });
 
 

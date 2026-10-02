@@ -2,6 +2,7 @@ using System.Text.Json;
 using StackExchange.Redis;
 using ReverseProxyService;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
 
@@ -37,7 +38,7 @@ builder.Services.AddHttpClient();
 
 
 // ==================================================
-// 4. Active ProductService instances
+// 4. Active ProductService Instances
 // ==================================================
 
 builder.Services.AddSingleton(
@@ -73,14 +74,29 @@ builder.Services.AddSingleton<ReverseProxyService>();
 builder.Services.AddHostedService<HealthCheckWorker>();
 
 
+// ==================================================
+// 8. Circuit Breaker
+// ==================================================
+
+builder.Services.AddSingleton(
+    new CircuitBreakerOptions
+    {
+        FailureThreshold = 3,
+        OpenDuration = TimeSpan.FromSeconds(30)
+    }
+);
+
+builder.Services.AddSingleton<CircuitBreakerManager>();
+
+
+// ==================================================
+// 9. Instance Selector
+// ==================================================
+
+builder.Services.AddSingleton<InstanceSelector>();
+
+
 var app = builder.Build();
-
-
-// ==================================================
-// Round Robin counter
-// ==================================================
-
-static int productServiceIndex = 0;
 
 
 // ==================================================
@@ -90,15 +106,15 @@ static int productServiceIndex = 0;
 app.Map("/{**path}", async (
     HttpContext context,
     ReverseProxyService proxyService,
-    ActiveInstancePool instancePool,
     CacheService cacheService,
-    CacheLockManager cacheLockManager) =>
+    CacheLockManager cacheLockManager,
+    InstanceSelector instanceSelector) =>
 {
     var path = context.Request.Path;
 
 
     // ==================================================
-    // Validate ProductGateway path
+    // Validate ProductGateway Path
     // ==================================================
 
     if (!path.StartsWithSegments("/api/products"))
@@ -112,13 +128,13 @@ app.Map("/{**path}", async (
 
 
     // =========================================================
-    // GET → CACHE
+    // GET REQUESTS
     // =========================================================
 
     if (HttpMethods.IsGet(context.Request.Method))
     {
         // =====================================================
-        // 1. Get current version
+        // 1. Get Current Cache Version
         // =====================================================
 
         var version =
@@ -128,7 +144,7 @@ app.Map("/{**path}", async (
 
 
         // =====================================================
-        // 2. Build cache key
+        // 2. Build Cache Key
         // =====================================================
 
         var cacheKey =
@@ -173,7 +189,7 @@ app.Map("/{**path}", async (
             if (cached != null)
             {
                 // ---------------------------------------------
-                // Restore status code
+                // Restore Status Code
                 // ---------------------------------------------
 
                 context.Response.StatusCode =
@@ -181,7 +197,7 @@ app.Map("/{**path}", async (
 
 
                 // ---------------------------------------------
-                // Restore headers
+                // Restore Headers
                 // ---------------------------------------------
 
                 foreach (var header in cached.Headers)
@@ -192,7 +208,7 @@ app.Map("/{**path}", async (
 
 
                 // ---------------------------------------------
-                // Restore body
+                // Restore Body
                 // ---------------------------------------------
 
                 await context.Response.WriteAsync(
@@ -201,6 +217,7 @@ app.Map("/{**path}", async (
                 );
             }
 
+
             Console.WriteLine(
                 "===================================="
             );
@@ -208,6 +225,10 @@ app.Map("/{**path}", async (
             return Results.Empty;
         }
 
+
+        // =====================================================
+        // CACHE MISS
+        // =====================================================
 
         Console.WriteLine("CACHE MISS");
 
@@ -223,7 +244,7 @@ app.Map("/{**path}", async (
 
 
         // =====================================================
-        // Wait for permission
+        // Wait for Permission
         // =====================================================
 
         await cacheLock.WaitAsync(
@@ -261,7 +282,7 @@ app.Map("/{**path}", async (
                 if (cached != null)
                 {
                     // -----------------------------------------
-                    // Restore status code
+                    // Restore Status Code
                     // -----------------------------------------
 
                     context.Response.StatusCode =
@@ -269,7 +290,7 @@ app.Map("/{**path}", async (
 
 
                     // -----------------------------------------
-                    // Restore headers
+                    // Restore Headers
                     // -----------------------------------------
 
                     foreach (var header in cached.Headers)
@@ -280,7 +301,7 @@ app.Map("/{**path}", async (
 
 
                     // -----------------------------------------
-                    // Restore body
+                    // Restore Body
                     // -----------------------------------------
 
                     await context.Response.WriteAsync(
@@ -288,6 +309,7 @@ app.Map("/{**path}", async (
                         context.RequestAborted
                     );
                 }
+
 
                 Console.WriteLine(
                     "===================================="
@@ -298,7 +320,7 @@ app.Map("/{**path}", async (
 
 
             // =================================================
-            // 6. STILL MISS
+            // 6. STILL CACHE MISS
             //    SELECT PRODUCT SERVICE INSTANCE
             // =================================================
 
@@ -308,31 +330,27 @@ app.Map("/{**path}", async (
                 );
 
 
-            var instances =
-                instancePool.GetInstances();
+            var selected =
+                instanceSelector.Select();
 
 
-            if (instances.Length == 0)
+            if (selected == null)
             {
+                Console.WriteLine(
+                    "No ProductService instance available"
+                );
+
                 return Results.StatusCode(
                     StatusCodes.Status503ServiceUnavailable
                 );
             }
 
 
-            // =================================================
-            // Round Robin
-            // =================================================
-
-            var index =
-                Interlocked.Increment(
-                    ref productServiceIndex
-                )
-                % instances.Length;
-
-
             var targetBaseUrl =
-                instances[index];
+                selected.BaseUrl;
+
+            var selectedCircuit =
+                selected.Circuit;
 
 
             var targetUrl =
@@ -359,6 +377,39 @@ app.Map("/{**path}", async (
                     context,
                     targetUrl
                 );
+
+
+            // =================================================
+            // Record Circuit Breaker Result
+            // =================================================
+
+            if (proxyResponse == null)
+            {
+                Console.WriteLine(
+                    $"Circuit failure: {targetBaseUrl}"
+                );
+
+                selectedCircuit.RecordFailure();
+            }
+            else if (
+                proxyResponse.StatusCode >= 500
+                && proxyResponse.StatusCode <= 599)
+            {
+                Console.WriteLine(
+                    $"Circuit failure: {targetBaseUrl} " +
+                    $"Status: {proxyResponse.StatusCode}"
+                );
+
+                selectedCircuit.RecordFailure();
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"Circuit success: {targetBaseUrl}"
+                );
+
+                selectedCircuit.RecordSuccess();
+            }
 
 
             // =================================================
@@ -403,6 +454,7 @@ app.Map("/{**path}", async (
 
     // =========================================================
     // NON-GET REQUESTS
+    // POST / PUT / PATCH / DELETE
     // =========================================================
 
     var servicePathForWrite =
@@ -411,31 +463,31 @@ app.Map("/{**path}", async (
         );
 
 
-    var writeInstances =
-        instancePool.GetInstances();
+    // =========================================================
+    // Select ProductService Instance
+    // =========================================================
+
+    var selectedWrite =
+        instanceSelector.Select();
 
 
-    if (writeInstances.Length == 0)
+    if (selectedWrite == null)
     {
+        Console.WriteLine(
+            "No ProductService instance available"
+        );
+
         return Results.StatusCode(
             StatusCodes.Status503ServiceUnavailable
         );
     }
 
 
-    // =========================================================
-    // Round Robin for write request
-    // =========================================================
-
-    var writeIndex =
-        Interlocked.Increment(
-            ref productServiceIndex
-        )
-        % writeInstances.Length;
-
-
     var writeTargetBaseUrl =
-        writeInstances[writeIndex];
+        selectedWrite.BaseUrl;
+
+    var selectedWriteCircuit =
+        selectedWrite.Circuit;
 
 
     var writeTargetUrl =
@@ -448,13 +500,11 @@ app.Map("/{**path}", async (
     Console.WriteLine("========== PRODUCT WRITE ==========");
     Console.WriteLine($"Method: {context.Request.Method}");
     Console.WriteLine($"Path:   {path}");
-    Console.WriteLine(
-        $"Target: {writeTargetUrl}"
-    );
+    Console.WriteLine($"Target: {writeTargetUrl}");
 
 
     // =========================================================
-    // Forward write request
+    // Forward Write Request
     // =========================================================
 
     var writeResponse =
@@ -465,7 +515,40 @@ app.Map("/{**path}", async (
 
 
     // =========================================================
-    // Successful write → bump cache version
+    // Record Circuit Breaker Result
+    // =========================================================
+
+    if (writeResponse == null)
+    {
+        Console.WriteLine(
+            $"Circuit failure: {writeTargetBaseUrl}"
+        );
+
+        selectedWriteCircuit.RecordFailure();
+    }
+    else if (
+        writeResponse.StatusCode >= 500
+        && writeResponse.StatusCode <= 599)
+    {
+        Console.WriteLine(
+            $"Circuit failure: {writeTargetBaseUrl} " +
+            $"Status: {writeResponse.StatusCode}"
+        );
+
+        selectedWriteCircuit.RecordFailure();
+    }
+    else
+    {
+        Console.WriteLine(
+            $"Circuit success: {writeTargetBaseUrl}"
+        );
+
+        selectedWriteCircuit.RecordSuccess();
+    }
+
+
+    // =========================================================
+    // Successful Write → Bump Cache Version
     // =========================================================
 
     if (HttpMethods.IsPost(context.Request.Method)
